@@ -1,0 +1,211 @@
+<?php
+    class DragonLive{
+        const VER = "0.0.1:122014";
+        private $code;
+        private $empty_reg;
+        private $output = '';
+        private $expression;
+        
+        public function __construct($argv = null){
+            echo "*********************************************".PHP_EOL;
+            echo "This is a compiler for DragonLive Language".PHP_EOL;
+            echo "Created By: Salik Sadruddin Merani | BB-25632".PHP_EOL;
+            echo "For Course: Compiler Contruction - CS 303".PHP_EOL;
+            echo "Institute Of Business and Technology | Biztek".PHP_EOL;
+            echo "*********************************************".PHP_EOL;
+            if(isset($argv[1]) && !is_null($argv[1])){
+                if($argv[1] == '-h' || $argv[1] == '--help'){
+                    echo "Input the file location after running the program when asked.".PHP_EOL;
+                }else{
+                    echo "Type: ".basename(__FILE__)." -h or ".basename(__FILE__)." --help".PHP_EOL.PHP_EOL;
+                }
+            }
+            $this->empty_reg = range(1,20);
+        }
+        
+        public function loadFile($fileloc){
+            $h = fopen(realpath($fileloc),'r');
+            $data = fread($h,filesize($fileloc));
+            fclose($h);
+            $this->code = trim($data);
+            $this->linearDiv();
+            $this->cleanCode();
+            //print_r( $this->code).PHP_EOL;
+            //exit;
+        }
+        
+        public function compile(){
+            foreach($this->code as $line){
+                //echo $line.PHP_EOL;
+                if(!$this->initVar($line)){
+                    $this->expression($line);
+                    $this->expToAsm();
+                }
+            }
+            echo $this->output;
+        }
+        
+        public function setRegister($start,$end){
+            if($this->isInt($start) && $this->isInt($end)){
+                $this->empty_reg = range($start,$end);
+            }
+        }
+        
+        private function linearDiv(){
+            $exp = explode('"',$this->code);
+            $this->code = null;
+            $this->code = $exp;
+        }
+        
+        private function isInt($inp){
+            if(is_numeric($inp)){
+                return true;
+            }else{
+                return false;
+            }
+        }
+        
+        private function isOp($inp){
+            $match = preg_match('/(\+)|(-)|(\*)|(\/)/',$inp);
+            return !!$match;
+        }
+        
+        private function throwError($error){
+            echo $this->errorType($error['code']).$error['msg'].PHP_EOL;
+            exit();
+        }
+        
+        private function errorType($code){
+            switch($code){
+                case 0:
+                    return 'Syntax Error: ';
+                break;
+                case 1:
+                    return 'Lexical Analysis Error: ';
+                break;
+                case 3:
+                    return 'Variable not found: ';
+                break;
+                default:
+                    return 'No Error'.PHP_EOL;
+                break;
+            }
+        }
+        
+        private function lexAnalysis(){
+            foreach($this->code as $line){
+                $tree[] = $this->parseTree($line);
+            }
+        }
+        
+        private function initVar($line){
+            if(preg_match('/(int )/',$line)){
+                if(preg_match('/(,)/',$line)){
+                    $vars = preg_split('/(int )/',$line);
+                    $vars = end($vars);
+                    if(preg_match('/(,)/',trim($vars))){
+                        $ex = explode(',',$vars);
+                        foreach($ex as $v){
+                            $this->output .= 'LW  $'.$this->start($this->empty_reg).', '.trim($v).PHP_EOL;
+                            $this->empty_reg = $this->removeTop($this->empty_reg);
+                        }
+                    }
+                }
+                return true;
+            }else{
+                return false;
+            }
+        }
+        
+        private function start(array $array){
+            return $array[0];
+        }
+        
+        private function removeTop(array $array){
+            array_shift($array);
+            return $array;
+        }
+        
+        private function hasElements(array $array){
+            return !empty($array);
+        }
+        
+        private function expression($line){
+            $op = NULL;
+            $res = NULL;
+            $arg1 = NULL;
+            $arg2 = NULL;
+            $isOP = $this->isOp($line);
+            if($this->isEqual($line)){
+                $part = explode('=',$line);
+                if($this->isOp(end($part))){
+                    $this->expression(end($part));
+                }else{
+                    $op = 'MOV';
+                    if($this->isInt(end($part))){
+                        $arg2 = "#".end($part);
+                    }else{
+                        $arg2 = end($part);
+                    }
+                    $arg1 = $this->start($part);
+                    $this->expression[] = array('op'=>$op,'arg1'=>$arg1,'arg2'=>$arg2,'res'=>$res);
+                }
+            }else{
+                //$this->throwError(array('code'=>0,'msg'=>'Unkown Operator '.__LINE__));
+            }
+        }
+        
+        private function whatOp($line){
+            if(preg_match('/(\+)/',$line)){
+                return 'ADD';
+            }elseif(preg_match('/(-)/',$line)){
+                return 'SUB';
+            }elseif(preg_match('/(\/)/',$line)){
+                return 'DIV';
+            }elseif(preg_match('/(*)/',$line)){
+                return 'MUL';
+            }else{
+                $this->throwError(array('code'=>0,'msg'=>'Undefined Operator'));
+            }
+        }
+        
+        private function isEqual($line){
+            if(preg_match('/(=)/',$line)){
+                return true;
+            }else{
+                return false;
+            }
+        }
+        
+        private function parseTree($line){
+            $ex = explode(' ', $line);
+            $tree = '[';
+            $key = array_search('=');
+            $tree .= $ex[$key].'[';
+        }
+        
+        private function expToAsm(){
+            foreach($this->expression as $exp){
+                $code = str_pad($exp['op'],3,' ', STR_PAD_RIGHT).' '.(is_null($exp['res']?'':$exp['res'].', ')).$exp['arg1'].", ".$exp['arg2'].PHP_EOL;
+                $this->output .= $code;
+            }
+        }
+        
+        private function cleanArray(array $dirty){
+            foreach($dirty as $elem){
+                $clean[] = trim($elem);
+            }
+            return $clean;
+        }
+        
+        private function cleanCode(){
+            foreach($this->code as $line){
+                if($line != ''){
+                    $array[] = trim($line);
+                }
+                
+            }
+            $this->code = $array;
+            return true;
+        }
+    }

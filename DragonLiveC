@@ -1,0 +1,318 @@
+<?php
+    class DragonLive{
+        const VER = "0.0.2:122014";
+        private $code;
+        private $empty_reg;
+        private $output = '';
+        private $expression;
+        private $stack;
+        
+        public function __construct($argv = null){
+            echo "*********************************************".PHP_EOL;
+            echo "This is a compiler for DragonLive Language".PHP_EOL;
+            echo "Created By: Salik Sadruddin Merani | BB-25632".PHP_EOL;
+            echo "For Course: Compiler Contruction - CS 303".PHP_EOL;
+            echo "Institute Of Business and Technology | Biztek".PHP_EOL;
+            echo "*********************************************".PHP_EOL.PHP_EOL;
+            if(isset($argv[1]) && !is_null($argv[1])){
+                if($argv[1] == '-h' || $argv[1] == '--help'){
+                    echo "Input the file location after running the program when asked.".PHP_EOL;
+                }elseif($argv[1] == '-i'){
+                    $loc = $argv[2];
+                    $this->loadFile($loc);
+                }else{
+                    echo "Type: ".basename(__FILE__)." -h or ".basename(__FILE__)." --help".PHP_EOL.PHP_EOL;
+                }
+                exit();
+            }
+            $this->empty_reg = range(1,20);
+        }
+        
+        //Loads the File
+        public function loadFile($fileloc){
+            $h = fopen(realpath($fileloc),'r');
+            $data = fread($h,filesize($fileloc));
+            fclose($h);
+            $this->code = trim($data);
+            $this->linearDiv();
+        }
+        
+        //Compiles the code
+        public function compile(){
+            $this->cleanCode();         //Cleans the white spaces
+            $this->removeComments();    //Remove comments from the lines
+            $this->checkCode();         //Fills up $stack[type]
+            $this->initVars();          //Initiate variables
+            foreach($this->code as $key => $line){
+                $this->expression($line);
+                $this->removeAt($key,$this->code);
+            }
+            $this->addLoadsToExp();
+            $this->expToAsm();
+            $this->writeAsm();
+            echo 'Compiled Successfully!'.PHP_EOL;
+        }
+        
+        //Divides the code Line-wise i.e. at `"`
+        private function linearDiv(){
+            $exp = explode('"',$this->code);
+            $this->code = null;
+            $this->code = $exp;
+        }
+        
+        //Cleans the code with empty new lines and extra spaces / CFG
+        private function cleanCode(){
+            foreach($this->code as $line){
+                if($line != ''){
+                    $code = trim($line);
+                    $code = preg_replace('/( )|(\t)/','',$code);
+                    $array[] = $code;
+                }
+            }
+            $this->code = $array;
+            return true;
+        }
+        
+        //checks if var init or code
+        private function checkCode(){
+            $code = $this->code;
+            foreach($code as $key => $line){
+                if(preg_match('/(:)/',$line)){
+                    $type = 'LOAD';
+                }elseif($this->isOp($line)){
+                    $type = 'EXP';
+                }elseif($this->isEqual($line)){
+                    $type = 'SAVE';
+                }else{
+                    $this->throwError(array('code'=>1,'msg'=>'Unknown characters '.__LINE__));
+                }
+                $this->stack['type'][$key] = $type;
+            }
+        }
+        
+        //Tells us if there is an operand in the line
+        private function isOp($inp){
+            $match = preg_match('/(\+)|(-)|(\*)|(\/)/',$inp);
+            return !!$match;
+        }
+        
+        //If it is value assigned
+        private function isEqual($line){
+            if(preg_match('/(=)/',$line)){
+                return true;
+            }else{
+                return false;
+            }
+        }
+        
+        //Tells which operator is this
+        private function whatOp($line){
+            if(preg_match('/(\+)/',$line)){
+                return 'ADD';
+            }elseif(preg_match('/(-)/',$line)){
+                return 'SUB';
+            }elseif(preg_match('/(\/)/',$line)){
+                return 'DIV';
+            }elseif(preg_match('/(*)/',$line)){
+                return 'MUL';
+            }else{
+                $this->throwError(array('code'=>0,'msg'=>'Undefined Operator'));
+            }
+        }
+        
+        //Remove Comments
+        private function removeComments(){
+            $code = $this->code;
+            foreach($code as $key => $line){
+                if(preg_match('/(\')/',$line)){
+                    unset($code[$key]);
+                }
+            }
+            $this->code = $code;
+        }
+        
+        //Set registers
+        public function setRegisters(int $start, int $end){
+            $this->empty_reg = range($start,$end);
+            return true;
+        }
+        
+        //Initiate variables
+        private function initVars(){
+            $array = $this->stack['type'];
+            $loads = array_keys($array,'LOAD');
+            foreach($loads as $line){
+                $vars = $this->code[$line];
+                $this->code = $this->removeAt($line,$this->code);
+                $sp = preg_split("/(:)/",$vars);
+                $vars = end($sp);
+                if(preg_match('/(,)/',$vars)){
+                    //echo 'MULTIPLE VARS'.PHP_EOL;;
+                    $ex = explode(',',$vars);
+                    foreach($ex as $var){
+                        $this->stack['reg_var'][$var] = '$'.$this->empty_reg[0];
+                        $this->empty_reg = $this->removeAt(0,$this->empty_reg);
+                    }
+                }else{
+                    $this->stack['reg_var'][$line] = '$'.$this->empty_reg[0];
+                }
+            }
+            return true;
+        }
+        
+        //Remove an item
+        private function removeAt($index, array $array){
+            unset($array[$index]);
+            $array = array_values($array);
+            return $array;
+        }
+        
+        //Checks if a var is initialized
+        public function checkVar($var){
+            $find = array_intersect_key($this->stack['reg_var'],array($var=>null));
+            return (count($find)>0?true:false);
+        }
+        
+        //Gets the register of var
+        public function getRegOfVar($var){
+            $find = array_intersect_key($this->stack['reg_var'],array($var=>null));
+            return end($find);
+        }
+        
+        //Expressions to Stack
+        private function expression($line){
+            if($this->isOp($line)){
+                $op = $this->whatOp($line);
+                switch($op){
+                    case 'ADD':
+                        $ex = '+';
+                        break;
+                    case 'SUB':
+                        $ex = '-';
+                        break;
+                    case 'MUL':
+                        $ex = '*';
+                        break;
+                    case 'DIV':
+                        $ex = '/';
+                        break;
+                }
+                $res = explode('=',$line);
+                $exp = $res[1];
+                $res = $res[0];
+                $exp = explode($ex,$exp);
+                $arg1 = $exp[0];
+                $arg2 = $exp[1];
+                if(!$this->checkVar($res)){
+                    $this->throwError(array('code'=>2,'msg'=>'Varable `'.$res.'` not initiated'));
+                }
+                if(!$this->checkVar($arg1)){
+                    $this->throwError(array('code'=>2,'msg'=>'Varable `'.$arg1.'` not initiated'));
+                }
+                if(!$this->checkVar($arg2)){
+                    $this->throwError(array('code'=>2,'msg'=>'Varable `'.$arg2.'` not initiated'));
+                }
+                $this->expression[] = array(
+                                            'op'    => $op,
+                                            'arg1'  => $arg1,
+                                            'arg2'  => $arg2,
+                                            'res'   => $res,
+                                        );
+            }elseif($this->isEqual($line)){
+                $sp = explode('=',$line);
+                $arg1 = $this->getRegOfVar($sp[0]);
+                $arg2 = $sp[1];
+                if($this->isInt($arg2)){
+                    $arg2 = '#'.$arg2;
+                }
+                $this->expression[] = array(
+                                            'op'    =>'MOV',
+                                            'arg1'  => $arg1,
+                                            'arg2'  => $arg2,
+                                            'res'   => NULL,
+                                        );
+            }
+        }
+        
+        private function addLoadsToExp(){
+            foreach($this->stack['reg_var'] as $var => $reg){
+                $arg1 = $reg;
+                $arg2 = $var;
+                $top[] = array(
+                                'op'    =>'LOAD',
+                                'arg1'  => $arg1,
+                                'arg2'  => $arg2,
+                                'res'   => NULL,
+                            );
+            }
+            $this->expression = $this->addToTop($top,$this->expression);
+        }
+        
+        //Add to the Top of an array
+        private function addToTop($top, $bottom){
+            $array = array();
+            foreach($top as $elem){
+                $array[] = $elem;
+            }
+            foreach($bottom as $elem){
+                $array[] = $elem;
+            }
+            return $array;
+        }
+        
+        //Expression to Assembly
+        private function expToAsm(){
+            $exp = $this->expression;
+            foreach($exp as $code){
+                $this->output .= str_pad($code['op'],5,' ').(is_null($code['res'])?'':$code['res'].', ').$code['arg1'].', '.$code['arg2'].PHP_EOL;
+            }
+            $this->output = trim($this->output);
+        }
+        
+        //Checks if theinput is Integer/Numeric
+        private function isInt($var){
+            //var_dump(preg_match('/([0-9])/',$var) && !preg_match('/([\\.])/',$var));exit;
+            if(preg_match('/([0-9])/',$var) && !preg_match('/([\\.])/',$var)){
+                return true;
+            }else{
+                return false;
+            }
+        }
+        
+        private function writeAsm(){
+            $name = time().'.asm';
+            $h = fopen('./'.$name, 'w+');
+            fwrite($h,$this->output);
+            fclose($h);
+        }
+        
+        //++ERROR GENERATOR++//
+        /* Throw an error */
+        private function throwError($error){
+            echo $this->errorType($error['code']).$error['msg'].PHP_EOL;
+            exit();
+        }
+        /* Error Type */
+        private function errorType($code){
+            switch($code){
+                case 0:
+                    return 'Syntax Error: ';
+                break;
+                case 1:
+                    return 'Lexical Analysis Error: ';
+                break;
+                case 2:
+                    return 'Variable not found: ';
+                break;
+                default:
+                    return 'No Error'.PHP_EOL;
+                break;
+            }
+        }
+        //--ERROR GENERATOR--//
+        
+        //Shows the code
+        public function showCode(){
+            print_r($this->output);
+        }
+    }
